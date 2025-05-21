@@ -1,0 +1,93 @@
+--Enviar mensaje
+
+ALTER PROCEDURE sp_EnviarMensaje
+    @RemitenteID INT,
+    @Contenido VARCHAR(MAX),
+    @Destinatarios VARCHAR(MAX)
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    DECLARE @MensajeID INT;
+    DECLARE @FechaActual DATETIME = GETDATE();
+    DECLARE @ID INT;
+    DECLARE @Pos INT = 1;
+    DECLARE @DestinatariosTemp VARCHAR(MAX) = @Destinatarios + ',';
+
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        -- Insertar mensaje
+        INSERT INTO Mensajes (RemitenteID, Contenido, FechaEnvio)
+        VALUES (@RemitenteID, @Contenido, @FechaActual);
+
+        SET @MensajeID = SCOPE_IDENTITY();
+
+        -- Insertar destinatarios
+        WHILE CHARINDEX(',', @DestinatariosTemp, @Pos) > 0
+        BEGIN
+            SET @ID = CAST(SUBSTRING(
+                @DestinatariosTemp,
+                @Pos,
+                CHARINDEX(',', @DestinatariosTemp, @Pos) - @Pos
+            ) AS INT);
+
+            INSERT INTO MensajesDestinatarios (MensajeID, DestinatarioID, Estado, FechaEstado)
+            VALUES (@MensajeID, @ID, 'Enviado', @FechaActual);
+
+            SET @Pos = CHARINDEX(',', @DestinatariosTemp, @Pos) + 1;
+        END
+
+        -- Insertar auditoría
+        INSERT INTO Auditoria (UsuarioID, Accion, Fecha, Descripcion)
+        VALUES (
+            @RemitenteID,
+            'Envio de mensaje',
+            @FechaActual,
+            CONCAT('Envié el mensaje ID ', @MensajeID, ' a: ', @Destinatarios)
+        );
+
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        ROLLBACK TRANSACTION;
+
+        THROW;
+    END CATCH
+END;
+
+
+--Actualizar el estado del mensaje
+
+ALTER PROCEDURE sp_ActualizarEstadoMensaje
+    @MensajeID INT,
+    @UsuarioID INT,
+    @NuevoEstado VARCHAR(20)
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        UPDATE MensajesDestinatarios
+        SET Estado = @NuevoEstado,
+            FechaEstado = GETDATE()
+        WHERE MensajeID = @MensajeID AND DestinatarioID = @UsuarioID;
+
+        INSERT INTO Auditoria (UsuarioID, Accion, Fecha, Descripcion)
+        VALUES (
+            @UsuarioID,
+            'Actualización de estado',
+            GETDATE(),
+            CONCAT('Mensaje ', @MensajeID, ' actualizado a "', @NuevoEstado, '"')
+        );
+
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        ROLLBACK TRANSACTION;
+
+        THROW;
+    END CATCH
+END;
